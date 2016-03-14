@@ -30,6 +30,7 @@
 
 #include "fmgr.h"
 #include "./../../common/src/pgr_types.h"
+#include "./../../common/src/time_msg.h"
 #include "./../../common/src/postgres_connection.h"
 #include "./dijkstra_driver.h"
 
