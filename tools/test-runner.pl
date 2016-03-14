@@ -15,11 +15,9 @@ use vars qw/*name *dir *prune/;
 *dir    = *File::Find::dir;
 *prune  = *File::Find::prune;
 
-my $DOCUMENTATION = 0;
 my $VERBOSE = 0;
 my $DRYRUN = 0;
 my $DEBUG = 0;
-my $DEBUG1 = 0;
 
 my $DBNAME = "pgr_test__db__test";
 my $DBUSER;
@@ -27,7 +25,7 @@ my $DBHOST;
 my $DBPORT;
 
 sub Usage {
-    die "Usage: algorithm-tester.pl -pgver vpg -pgisver vpgis -psql /path/to/psql\n" .
+    die "Usage: test-runner.pl -pgver vpg -pgisver vpgis -psql /path/to/psql\n" .
         "       -pgver vpg          - postgresql version\n" .
         "       -pghost host        - postgresql host or socket directory to use\n" .
         "       -pgport port        - postgresql port to use\n" .
@@ -35,25 +33,20 @@ sub Usage {
         "       -pgisver vpgis      - postgis version\n" .
         "       -pgrver vpgr        - pgrouting version\n" .
         "       -psql /path/to/psql - optional path to psql\n" .
-        "       -v                  - verbose messages for small debuging\n" .
-        "       -debug              - verbose messages for debuging(enter twice for more)\n" .
-        "       -debug1             - DEBUG1 messages (for timing reports)\n" .
+        "       -v                  - verbose messages for debuging(enter twice for more)\n" .
         "       -clean              - dropdb pgr_test__db__test\n" .
         "       -ignorenotice       - ignore NOTICE statements when reporting failures\n" .
         "       -alg 'dir'          - directory to select which algorithm subdirs to test\n" .
-        "       -documentation      - ONLY generate documentation examples\n" .
         "       -h                  - help\n";
 }
 
-print "RUNNING: algorithm-tester.pl " . join(" ", @ARGV) . "\n";
+print "RUNNING: test-runner.pl " . join(" ", @ARGV) . "\n";
 
-my ($vpg, $postgis_ver, $vpgr, $psql);
+my ($vpg, $vpgis, $vpgr, $psql);
 my $alg = '';
 my @testpath = ("doc/", "src/");
 my $clean;
 my $ignore;
-
-$postgis_ver = '';
 
 while (my $a = shift @ARGV) {
     if ( $a eq '-pgver') {
@@ -69,8 +62,7 @@ while (my $a = shift @ARGV) {
         $DBUSER = shift @ARGV || Usage();
     }
     elsif ($a eq '-pgisver') {
-        $postgis_ver = shift @ARGV || Usage();
-        $postgis_ver = " VERSION '$postgis_ver'";
+        $vpgis = shift @ARGV || Usage();
     }
     elsif ($a eq '-pgrver') {
         $vpgr = shift @ARGV || Usage();
@@ -99,19 +91,9 @@ while (my $a = shift @ARGV) {
     elsif ($a =~ /^-ignoren/i) {
         $ignore = 1;;
     }
-    elsif ($a =~ /^-debug1$/i) {
-        $DEBUG1 = 1 unless $DOCUMENTATION;
-    }
-    elsif ($a =~ /^-debug$/i) {
-        $DEBUG++;
-        $VERBOSE = 1;
-    }
     elsif ($a =~ /^-v/i) {
-        $VERBOSE = 1;
-    }
-    elsif ($a =~ /^-doc(umentation)?/i) {
-        $DOCUMENTATION = 1;
-        $DEBUG1 = 0; # disbale timing reports during documentation generation
+        $VERBOSE = 1 if $DEBUG;
+        $DEBUG = 1;
     }
     else {
         warn "Error: unknown option '$a'\n";
@@ -162,13 +144,11 @@ File::Find::find({wanted => \&want_tests}, @testpath);
 
 die "Error: no test files found. Run this command from the top level pgRouting directory!\n" unless @cfgs;
 
-createTestDB($DBNAME);
+createTestDB();
 
 $vpg = '' if ! $vpg;
-$postgis_ver = '' if ! $postgis_ver;
+$vpgis = '' if ! $vpgis;
 
-# cfgs = SET of configuration file names
-# c  one file in cfgs
 for my $c (@cfgs) {
     my $found = 0;
 
@@ -178,17 +158,16 @@ for my $c (@cfgs) {
     print "test.conf = $c\n" if $VERBOSE;
     print Data::Dumper->Dump([\%main::tests],['test']) if $VERBOSE;
 
-    if ($main::tests{any} && !$DOCUMENTATION) {
+    if ($main::tests{any}) {
         push @{$stats{$c}}, run_test($c, $main::tests{any});
         $found++;
     }
-    elsif ($main::tests{any}{documentation} && $DOCUMENTATION) {
-        push @{$stats{$c}}, run_test($c, $main::tests{any});
+    if ($main::tests{"$vpg-$vpgis"}) {
+        push @{$stats{$c}}, run_test($c, $main::tests{"$vpg-$vpgis"});
         $found++;
     }
-
     if (! $found) {
-        $stats{$c} = "No tests were found for '$vpg-$postgis_ver'!";
+        $stats{$c} = "No tests were found for '$vpg-$vpgis'!";
     }
 }
 
@@ -200,149 +179,85 @@ unlink $TMP;
 unlink $TMP2;
 unlink $TMP3;
 
-if ($stats{z_crash} > 0 || $stats{z_fail} > 0) {
+if ($stats{z_crash} || $stats{z_fail}) {
     exit 1;  # signal we had failures
 }
 
 exit 0;      # signal we passed all the tests
 
 
-# c  one file in cfgs
-# t  contents of array that has keys comment, data and test
 sub run_test {
     my $c = shift;
-    my $t = shift;  
+    my $t = shift;
     my %res = ();
 
     my $dir = dirname($c);
 
     $res{comment} = $t->{comment} if $t->{comment};
-    #t->{data}  referencing the key data of the data files
-
-    my $singleDB = "____pgr___single_test___";
-    for my $testName (@{$t->{singleTest}}) {
-        createTestDB($singleDB);
-        mysystem("$psql $connopts -A -t -q -f tools/testers/sampledata.sql' $singleDB >> $TMP2 2>\&1 ");
-        for my $x (@{$t->{data}}) {
-           mysystem("$psql $connopts -A -t -q -f '$dir/$x' $singleDB >> $TMP2 2>\&1 ");
-        }
-        process_single_test($testName, $dir, $singleDB,\%res);
-        mysystem("dropdb $connopts $singleDB");
-    }
-
-    mysystem("$psql $connopts -A -t -q -f tools/testers/sampledata.sql $DBNAME >> $TMP2 2>\&1 ");
     for my $x (@{$t->{data}}) {
-       mysystem("$psql $connopts -A -t -q -f '$dir/$x' $DBNAME >> $TMP2 2>\&1 ");
+        mysystem("$psql $connopts -A -t -q -f '$dir/$x' $DBNAME >> $TMP2 2>\&1 ");
     }
 
-    if ($DOCUMENTATION) {
-        for my $x (@{$t->{documentation}}) {
-            process_single_test($x, $dir,, $DBNAME, \%res)
-        }
-    }
-    else {
-        for my $x (@{$t->{tests}}) {
-            process_single_test($x, $dir,, $DBNAME, \%res)
-        }
-    }
-
-    return \%res;
-}
-
-sub process_single_test{
-    my $x = shift;
-    my $dir = shift;
-    my $database = shift;
-    my $res = shift;
-        #each tests will use clean data
-
-        print "Processing test: $dir/$x\n";
+    for my $x (@{$t->{tests}}) {
+        print "Processing test: $x\n";
         my $t0 = [gettimeofday];
-        #TIN = test_input_file
         open(TIN, "$dir/$x.test.sql") || do {
-            $res->{"$dir/$x.test.sql"} = "FAILED: could not open '$dir/$x.test.sql' : $!";
+            $res{"$dir/$x.test.sql"} = "FAILED: could not open '$dir/$x.test.sql' : $!";
             $stats{z_fail}++;
             next;
         };
-        #reason of opening conection is because the set client_min_messages to warning;
-        if ($DOCUMENTATION) {
-            mysystem("mkdir -p '$dir/../doc' "); # make sure the directory exists
-            open(PSQL, "|$psql $connopts --set='VERBOSITY terse' -e $database > $dir/../doc/$x.queries 2>\&1 ") || do {
-                $res->{"$dir/$x.test.sql"} = "FAILED: could not open connection to db : $!";
-                $stats{z_fail}++;
-                next;
-            };
-        }
-        else {
-            open(PSQL, "|$psql $connopts --set='VERBOSITY terse' -A -t -q $database > $TMP 2>\&1 ") || do {
-                $res->{"$dir/$x.test.sql"} = "FAILED: could not open connection to db : $!";
-                $stats{z_fail}++;
-                next;
-            };
-        }
+        open(PSQL, "|$psql $connopts -A -t -q $DBNAME > $TMP 2>\&1 ") || do {
+            $res{"$dir/$x.test.sql"} = "FAILED: could not open connection to db : $!";
+            $stats{z_fail}++;
+            next;
+        };
         print PSQL "set client_min_messages to WARNING;\n" if $ignore;
-        print PSQL "set client_min_messages to DEBUG1;\n" if $DEBUG1;
         my @d = ();
-        @d = <TIN>; #reads the whole file into the array @d 
-        print PSQL @d; #prints the whole fle stored in @d
-        close(PSQL); #executes everything
-        close(TIN); #closes the input file  /TIN = test input
-
-        return if $DOCUMENTATION;
+        @d = <TIN>;
+        print PSQL @d;
+        close(PSQL);
+        close(TIN);
 
         my $dfile;
         my $dfile2;
-        if ($ignore) { #decide how to compare results, if ignoring or not ignoring
+        if ($ignore) {
             $dfile2 = $TMP2;
             mysystem("grep -v NOTICE '$TMP' | grep -v '^CONTEXT:' | grep -v '^PL/pgSQL function' > $dfile2");
             $dfile = $TMP3;
             mysystem("grep -v NOTICE '$dir/$x.result' | grep -v '^CONTEXT:' | grep -v '^PL/pgSQL function' > $dfile");
         }
-        elsif ($DEBUG1) { #to delete CONTEXT lines
-            $dfile2 = $TMP2;
-            mysystem("grep -v '^CONTEXT:' '$TMP' | grep -v '^PL/pgSQL function' > $dfile2");
-            $dfile = $TMP3;
-            mysystem("grep -v '^CONTEXT:' '$dir/$x.result' | grep -v '^PL/pgSQL function' > $dfile");
-        }
         else {
             $dfile = "$dir/$x.result";
             $dfile2 = $TMP;
         }
-        if (! -f "$dir/$x.result") {
-            $res->{"$dir/$x.test.sql"} = "\nFAILED: result file missing : $!";
-            $stats{z_fail}++;            
-            next;
-        }
-
         # use diff -w to ignore white space differences like \r vs \r\n
-        #ignore white spaces when comparing
-        #dfile is expected results
-        #dfile2 is the actual results
         my $r = `diff -w '$dfile' '$dfile2' `;
-        #looks for removing leading blanks and trailing blanks
         $r =~ s/^\s*|\s*$//g;
         if ($r =~ /connection to server was lost/) {
-            $res->{"$dir/$x.test.sql"} = "CRASHED SERVER: $r";
+            $res{"$dir/$x.test.sql"} = "CRASHED SERVER: $r";
             $stats{z_crash}++;
             # allow the server some time to recover from the crash
             warn "CRASHED SERVER: '$dir/$x.test.sql', sleeping 5 ...\n";
-            sleep 20;
+            sleep 5;
         }
-        #if the diff has 0 length then everything was the same, so here we detect changes
         elsif (length($r)) {
-            $res->{"$dir/$x.test.sql"} = "FAILED: $r";
+            $res{"$dir/$x.test.sql"} = "FAILED: $r";
             $stats{z_fail}++;
         }
+# TODO missing when the result file does not exist
         else {
-            $res->{"$dir/$x.test.sql"} = "Passed";
+            $res{"$dir/$x.test.sql"} = "Passed";
             $stats{z_pass}++;
         }
         print "    test run time: " . tv_interval($t0, [gettimeofday]) . "\n";
+    }
+
+    return \%res;
 }
 
 sub createTestDB {
-    my $databaseName = shift;
-    dropTestDB() if dbExists($databaseName);
+    die "ERROR: test database '$DBNAME' exists, you must drop or rename it!\n"
+        if dbExists($DBNAME);
 
     my $template;
 
@@ -357,54 +272,51 @@ sub createTestDB {
     # first create a database with postgis installed in it
     if (version_greater_eq($dbver, '9.1') &&
             -f "$dbshare/extension/postgis.control") {
-        mysystem("createdb $connopts $databaseName");
-        die "ERROR: Failed to create database '$databaseName'!\n"
-            unless dbExists($databaseName);
+        mysystem("createdb $connopts $DBNAME");
+        die "ERROR: Failed to create database '$DBNAME'!\n"
+            unless dbExists($DBNAME);
+        my $myver = '';
+        if ($vpgis) {
+            $myver = " VERSION '$vpgis'";
+        }
         my $encoding = '';
         if ($OS =~ /msys/
             || $OS =~ /MSWin/) {
             $encoding = "SET client_encoding TO 'UTF8';";
         }
-        print "-- Trying to install postgis extension $postgis_ver\n" if $DEBUG;
-        mysystem("$psql $connopts -c \"$encoding create extension postgis $postgis_ver \" $databaseName");
-#        print "-- Trying to install pgTap extension \n" if $DEBUG;
-#        system("$psql $connopts -c \"$encoding create extension pgtap \" $databaseName");
-#        if ($? != 0) {
-#            print "Failed: create extension pgtap\n" if $VERBOSE || $DRYRUN;
-#            die;
-#        }
+        print "-- Trying to install postgis extension $myver\n" if $DEBUG;
+        mysystem("$psql $connopts -c \"$encoding create extension postgis $myver\" $DBNAME");
     }
-    #
-#    else {
-#        if ($vpgis && dbExists("template_postgis_$vpgis")) {
-#            $template = "template_postgis_$vpgis";
-#        }
-#        elsif (dbExists('template_postgis')) {
-#            $template = "template_postgis";
-#        }
-#        else {
-#            die "ERROR: Could not find an appropriate template_postgis database!\n";
-#        }
-#        print "-- Trying to install postgis from $template\n" if $DEBUG;
-#        mysystem("createdb $connopts -T $template $databaseName");
-#        sleep(2);
-#        die "ERROR: Failed to create database '$databaseName'!\n"
-#            if ! dbExists($databaseName);
-#    }
+    else {
+        if ($vpgis && dbExists("template_postgis_$vpgis")) {
+            $template = "template_postgis_$vpgis";
+        }
+        elsif (dbExists('template_postgis')) {
+            $template = "template_postgis";
+        }
+        else {
+            die "ERROR: Could not find an appropriate template_postgis database!\n";
+        }
+        print "-- Trying to install postgis from $template\n" if $DEBUG;
+        mysystem("createdb $connopts -T $template $DBNAME");
+        sleep(2);
+        die "ERROR: Failed to create database '$DBNAME'!\n"
+            if ! dbExists($DBNAME);
+    }
 
     # next we install pgrouting into the new database
     if (version_greater_eq($dbver, '9.1') &&
-        -f "$dbshare/extension/postgis.control") {
+            -f "$dbshare/extension/postgis.control") {
         my $myver = '';
         if ($vpgr) {
             $myver = " PGROUTING VERSION '$vpgr'";
         }
         print "-- Trying to install pgrouting extension $myver\n" if $DEBUG;
-        mysystem("$psql $connopts -c \"create extension pgrouting $myver\" $databaseName");
+        mysystem("$psql $connopts -c \"create extension pgrouting $myver\" $DBNAME");
     }
     elsif ($vpgr && -f "$dbshare/extension/pgrouting--$vpgr.sql") {
         print "-- Trying to install pgrouting from '$dbshare/extension/pgrouting--$vpgr.sql'\n" if $DEBUG;
-        mysystem("$psql $connopts -f '$dbshare/extension/pgrouting--$vpgr.sql' $databaseName");
+        mysystem("$psql $connopts -f '$dbshare/extension/pgrouting--$vpgr.sql' $DBNAME");
     }
     else {
         my $find = `find "$dbshare/contrib" -name pgrouting.sql | sort -r -n `;
@@ -412,7 +324,7 @@ sub createTestDB {
         my $file = shift @found;
         if ($file && length($file)) {
             print "-- Trying to install pgrouting from '$file'\n" if $DEBUG;
-            mysystem("$psql $connopts -f '$file' $databaseName");
+            mysystem("$psql $connopts -f '$file' $DBNAME");
         }
         else {
             mysystem("ls -alR $dbshare") if $DEBUG;
@@ -422,12 +334,10 @@ sub createTestDB {
 
     # now verify that we have pgrouting installed
 
-    my $pgrv = `$psql $connopts -c "select pgr_version()" $databaseName`;
+    my $pgrv = `$psql $connopts -c "select pgr_version()" $DBNAME`;
     die "ERROR: failed to install pgrouting into the database!\n"
-    unless $pgrv;
-    print `$psql $connopts -c "select version();" postgres `, "\n";
-    print `$psql $connopts -c "select postgis_full_version();" $databaseName `, "\n";
-    print `$psql $connopts -c "select pgr_version();" $databaseName `, "\n";
+        unless $pgrv;
+
 }
 
 sub dropTestDB {
