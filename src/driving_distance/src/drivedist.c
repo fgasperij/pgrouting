@@ -30,6 +30,7 @@
 
 #include "fmgr.h"
 #include "./../../common/src/pgr_types.h"
+#include "./../../common/src/time_msg.h"
 #include "./../../common/src/postgres_connection.h"
 #include "./boost_interface_drivedist.h"
 
@@ -58,10 +59,12 @@ static int compute_driving_distance(char* sql, int64_t start_vertex,
 
   PGR_DBG("Total %ld tuples in query:", total_tuples);
 
+  clock_t start_t = clock();
   ret = do_pgr_driving_distance(edges, total_tuples,
                         start_vertex, distance,
                         directed,
                         path, path_count, &err_msg);
+  time_msg(" processing drivingDistance one start", start_t, clock());
 
   if (ret < 0) {
       ereport(ERROR, (errcode(ERRCODE_E_R_E_CONTAINING_SQL_NOT_PERMITTED),

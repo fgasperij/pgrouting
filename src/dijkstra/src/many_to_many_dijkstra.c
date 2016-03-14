@@ -54,10 +54,13 @@ static int dijkstra_many_to_many_driver(
 
   pgr_get_data(sql, &edges, &total_tuples, has_rcost, -1, -1);
 
+  clock_t start_t = clock();
   ret = do_pgr_dijkstra_many_to_many(edges, total_tuples,
                         start_vertex, s_len, end_vertex, e_len,
                         has_rcost, directed,
                         path, path_count, &err_msg);
+  time_msg(" processing Dijkstra many to many", start_t, clock());
+
 
   if (ret < 0) {
       ereport(ERROR, (errcode(ERRCODE_E_R_E_CONTAINING_SQL_NOT_PERMITTED),

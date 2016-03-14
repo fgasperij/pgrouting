@@ -29,6 +29,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
 #include "pgr_types.h"
 #include "postgres_connection.h"
+#include "time_msg.h"
 
 #define TUPLIMIT 1000
 
@@ -82,6 +83,7 @@ int64_t* pgr_get_bigIntArray(int *arrlen, ArrayType *input) {
     Datum      *i_data;
     int         i, n;
     int64_t      *data;
+    clock_t start_t = clock();
 
     /* get input array element type */
     i_eltype = ARR_ELEMTYPE(input);
@@ -144,6 +146,7 @@ int64_t* pgr_get_bigIntArray(int *arrlen, ArrayType *input) {
     pfree(nulls);
     pfree(i_data);
 
+    time_msg(" reading Array", start_t, clock());
     return (int64_t*)data;
 }
 
@@ -256,6 +259,7 @@ int pgr_get_data(
     bool has_rcost,
     int64_t start_vertex,
     int64_t end_vertex) {
+  clock_t start_t = clock();
   PGR_DBG("Entering pgr_get_data");
 
   bool sourceFound = false;
@@ -379,6 +383,7 @@ int pgr_get_data(
   }
 
   (*totalTuples) = total_tuples;
+  time_msg(" reading Edges", start_t, clock());
   return 0;
 }
 

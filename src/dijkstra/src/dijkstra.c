@@ -30,6 +30,7 @@
 
 #include "fmgr.h"
 #include "./../../common/src/pgr_types.h"
+#include "./../../common/src/time_msg.h"
 #include "./../../common/src/postgres_connection.h"
 #include "./dijkstra_driver.h"
 
@@ -95,10 +96,13 @@ static int compute_shortest_path(char* sql, int64_t start_vertex,
 
   PGR_DBG("Total %ld tuples in query:", total_tuples);
 
+  clock_t start_t = clock();
   ret = do_pgr_dijkstra(edges, total_tuples,
                         start_vertex, end_vertex,
                         has_rcost, directed,
                         path, path_count, &err_msg);
+  time_msg(" processing Dijkstra one to one", start_t, clock());
+
 
   if (ret < 0) {
       ereport(ERROR, (errcode(ERRCODE_E_R_E_CONTAINING_SQL_NOT_PERMITTED),

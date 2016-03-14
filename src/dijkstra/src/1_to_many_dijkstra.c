@@ -61,10 +61,13 @@ static int dijkstra_1_to_many_driver(
     return SPIcode;
   }
 
+  clock_t start_t = clock();
   ret = do_pgr_dijkstra_1_to_many(edges, total_tuples,
                         start_vertex, end_vertex, num,
                         has_rcost, directed,
                         path, path_count, &err_msg);
+  time_msg(" processing Dijkstra one to many", start_t, clock());
+
 
   if (ret < 0) {
       ereport(ERROR, (errcode(ERRCODE_E_R_E_CONTAINING_SQL_NOT_PERMITTED),

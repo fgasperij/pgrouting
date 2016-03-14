@@ -33,6 +33,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 #endif
 
 #include "./../../common/src/pgr_types.h"
+#include "./../../common/src/time_msg.h"
 #include "./../../common/src/postgres_connection.h"
 #include "./ksp.h"
 #include "./ksp_driver.h"
@@ -197,11 +198,13 @@ int compute(char* sql, int64_t start_vertex,
   PGR_DBG("Total %ld tuples in query:", total_tuples);
   PGR_DBG("Calling do_pgr_ksp\n");
 
+  clock_t start_t = clock();
   ret = do_pgr_ksp(edges, total_tuples,
             start_vertex, end_vertex,
                        no_paths, has_rcost, directed,
                        ksp_path, path_count, &err_msg);
 
+  time_msg(" processing ksp", start_t, clock());
   PGR_DBG("total tuples found %i\n", *path_count);
   PGR_DBG("Exist Status = %i\n", ret);
   PGR_DBG("Returned message = %s\n", err_msg);
